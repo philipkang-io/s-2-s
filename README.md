@@ -20,3 +20,10 @@ spec commit -> diff vs Spec Hub (oasdiff) -> alert -> approve -> update Spec Hub
 - Repo secret `POSTMAN_API_KEY`; optional `SLACK_WEBHOOK_URL`.
 - Environment `spechub-approval` with a required reviewer.
 - `SPEC_ID` and `COLLECTION_UID` in the workflow point at the Postman workspace `[philip]spec-to-spechub-demo`.
+
+## Replaying Act 2
+`demo/act2-spec-change.patch` is the engineering change (adds `overdraftLimit` to Balance and `GET /accounts/{accountId}/statements`).
+```
+git apply demo/act2-spec-change.patch && git commit -am "feat: add statements endpoint" && git push
+```
+Then approve the `spechub-approval` environment on the run. To reset: PATCH the baseline spec back into Spec Hub, re-sync the collection, and revert the spec in `main`.
