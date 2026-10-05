@@ -40,7 +40,8 @@ jobs:
         run: |
           docker run --rm -v "$PWD/diff:/data" tufin/oasdiff changelog /data/base.yaml /data/new.yaml > diff/changelog.txt || true
           docker run --rm -v "$PWD/diff:/data" tufin/oasdiff breaking /data/base.yaml /data/new.yaml > diff/breaking.txt || true
-          if [ -s diff/changelog.txt ]; then echo "changed=true" >> "$GITHUB_OUTPUT"; else echo "changed=false" >> "$GITHUB_OUTPUT"; fi
+          # oasdiff prints "No changes detected" for identical specs, so an empty check is not enough
+          if [ -s diff/changelog.txt ] && ! grep -q "No changes detected" diff/changelog.txt; then echo "changed=true" >> "$GITHUB_OUTPUT"; else echo "changed=false" >> "$GITHUB_OUTPUT"; fi
 
       - name: Alert reviewers
         if: steps.d.outputs.changed == 'true'
