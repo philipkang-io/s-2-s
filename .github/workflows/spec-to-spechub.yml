@@ -1,0 +1,101 @@
+name: spec-to-spechub
+
+# Engineering commits a spec to GitHub. This workflow diffs it against the spec
+# currently in Postman Spec Hub, alerts reviewers, waits for approval, then updates
+# Spec Hub and regenerates the linked collection. Nothing is written back to Git.
+
+on:
+  push:
+    branches: [main]
+    paths: ['specs/**']
+  workflow_dispatch:
+
+permissions:
+  contents: write   # commit comment for the alert
+
+env:
+  SPEC_ID: 11360fd7-754a-49ef-9cdf-fa193bad5aaa
+  COLLECTION_UID: 52509354-fbcaeb1b-223c-4c84-b408-fcb16420057e
+  SPEC_FILE: accounts.yaml
+
+jobs:
+  diff:
+    runs-on: ubuntu-latest
+    outputs:
+      changed: ${{ steps.d.outputs.changed }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch the approved spec from Spec Hub
+        env:
+          POSTMAN_API_KEY: ${{ secrets.POSTMAN_API_KEY }}
+        run: |
+          mkdir -p diff
+          curl -sf "https://api.postman.com/specs/$SPEC_ID/files/$SPEC_FILE" \
+            -H "X-API-Key: $POSTMAN_API_KEY" | jq -r .content > diff/base.yaml
+          cp "specs/$SPEC_FILE" diff/new.yaml
+
+      - name: Diff (oasdiff)
+        id: d
+        run: |
+          docker run --rm -v "$PWD/diff:/data" tufin/oasdiff changelog /data/base.yaml /data/new.yaml > diff/changelog.txt || true
+          docker run --rm -v "$PWD/diff:/data" tufin/oasdiff breaking /data/base.yaml /data/new.yaml > diff/breaking.txt || true
+          if [ -s diff/changelog.txt ]; then echo "changed=true" >> "$GITHUB_OUTPUT"; else echo "changed=false" >> "$GITHUB_OUTPUT"; fi
+
+      - name: Alert reviewers
+        if: steps.d.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          {
+            echo "## Spec change detected: awaiting review"
+            echo
+            echo "Commit \`${GITHUB_SHA::7}\` changes \`$SPEC_FILE\` compared with the spec in Spec Hub."
+            echo
+            echo "### All changes"; echo '```'; cat diff/changelog.txt; echo '```'
+            echo "### Breaking changes"; echo '```'; if [ -s diff/breaking.txt ]; then cat diff/breaking.txt; else echo "none"; fi; echo '```'
+            echo
+            echo "Approve the **spechub-approval** environment in the next job to update Spec Hub and regenerate the collection."
+          } > diff/alert.md
+          cat diff/alert.md >> "$GITHUB_STEP_SUMMARY"
+          gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/comments" -F body=@diff/alert.md > /dev/null
+          if [ -n "$SLACK_WEBHOOK_URL" ]; then
+            jq -n --rawfile t diff/alert.md '{text:$t}' | curl -s -X POST -H 'Content-Type: application/json' -d @- "$SLACK_WEBHOOK_URL" > /dev/null
+          fi
+
+  publish:
+    needs: diff
+    if: needs.diff.outputs.changed == 'true'
+    runs-on: ubuntu-latest
+    environment: spechub-approval   # required reviewer = the approval gate
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Update the spec in Spec Hub
+        env:
+          POSTMAN_API_KEY: ${{ secrets.POSTMAN_API_KEY }}
+        run: |
+          jq -Rs '{content: .}' "specs/$SPEC_FILE" > body.json
+          curl -sf -X PATCH "https://api.postman.com/specs/$SPEC_ID/files/$SPEC_FILE" \
+            -H "X-API-Key: $POSTMAN_API_KEY" -H "Content-Type: application/json" -d @body.json > /dev/null
+          echo "Spec Hub updated."
+
+      - name: Regenerate the linked collection
+        env:
+          POSTMAN_API_KEY: ${{ secrets.POSTMAN_API_KEY }}
+        run: |
+          code=$(curl -s -o resp.json -w '%{http_code}' -X PUT \
+            "https://api.postman.com/collections/$COLLECTION_UID/synchronizations?specId=$SPEC_ID" \
+            -H "X-API-Key: $POSTMAN_API_KEY")
+          if [ "$code" = "400" ] && grep -q "already in sync" resp.json; then echo "Collection already in sync."; exit 0; fi
+          [ "$code" = "202" ] || { echo "Sync request failed ($code)"; cat resp.json; exit 1; }
+          url=$(jq -r .url resp.json)
+          for i in $(seq 1 30); do
+            s=$(curl -s "https://api.postman.com$url" -H "X-API-Key: $POSTMAN_API_KEY" | jq -r .status)
+            echo "sync status: $s"
+            [ "$s" = "completed" ] && { echo "### Spec Hub updated and collection regenerated" >> "$GITHUB_STEP_SUMMARY"; exit 0; }
+            [ "$s" = "failed" ] && exit 1
+            sleep 4
+          done
+          echo "Timed out waiting for collection sync"; exit 1

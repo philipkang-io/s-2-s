@@ -1,0 +1,444 @@
+openapi: 3.0.3
+info:
+  title: Accounts API
+  description: |
+    The Accounts API provides comprehensive access to customer bank accounts, enabling 
+    retrieval of account details, balances, and account management operations.
+    
+    ## Features
+    - Retrieve account details and balances
+    - List all accounts for a customer
+    - Get account holder information
+    - Support for checking, savings, and money market accounts
+    
+    ## Authentication
+    All endpoints require OAuth 2.0 Bearer token authentication.
+  version: 2.1.0
+  contact:
+    name: Banking API Support
+    email: api-support@acmefinancial.com
+    url: https://developer.acmefinancial.com/support
+  license:
+    name: Proprietary
+    url: https://acmefinancial.com/api-license
+
+servers:
+  - url: https://api-acmefinancial.postman-solutions.com
+    description: Production
+  - url: https://sandbox-acmefinancial.postman-solutions.com
+    description: Sandbox
+
+tags:
+  - name: Accounts
+    description: Account management operations
+  - name: Balances
+    description: Account balance operations
+
+paths:
+  /accounts:
+    get:
+      tags:
+        - Accounts
+      summary: List all accounts
+      description: Retrieve a list of all accounts for the authenticated customer
+      operationId: listAccounts
+      parameters:
+        - name: accountType
+          in: query
+          description: Filter by account type
+          schema:
+            type: string
+            enum: [checking, savings, money_market]
+        - name: status
+          in: query
+          description: Filter by account status
+          schema:
+            type: string
+            enum: [active, dormant, closed]
+        - name: limit
+          in: query
+          description: Maximum number of accounts to return
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+        - name: offset
+          in: query
+          description: Number of accounts to skip
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountList'
+              examples:
+                success:
+                  summary: List of accounts
+                  value:
+                    data:
+                      - accountId: ACC-001-CHECKING
+                        accountType: checking
+                        nickname: Primary Checking
+                        currency: USD
+                        status: active
+                      - accountId: ACC-002-SAVINGS
+                        accountType: savings
+                        nickname: High Yield Savings
+                        currency: USD
+                        status: active
+                    pagination:
+                      total: 2
+                      limit: 20
+                      offset: 0
+                      hasMore: false
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+      security:
+        - bearerAuth: []
+
+  /accounts/{accountId}:
+    get:
+      tags:
+        - Accounts
+      summary: Get account details
+      description: Retrieve detailed information for a specific account
+      operationId: getAccount
+      parameters:
+        - $ref: '#/components/parameters/accountId'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Account'
+              examples:
+                checking:
+                  summary: Checking account example
+                  value:
+                    accountId: ACC-001-CHECKING
+                    accountNumber: "****4521"
+                    routingNumber: "021000021"
+                    accountType: checking
+                    nickname: Primary Checking
+                    currency: USD
+                    status: active
+                    openedDate: "2019-03-15"
+                    interestRate: 0.01
+                    balance:
+                      current: 15670.50
+                      available: 15420.50
+                      pending: 250.00
+                      currency: USD
+                      asOf: "2024-01-15T10:30:00Z"
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+      security:
+        - bearerAuth: []
+
+  /accounts/{accountId}/balance:
+    get:
+      tags:
+        - Balances
+      summary: Get account balance
+      description: Retrieve current and available balance for an account
+      operationId: getAccountBalance
+      parameters:
+        - $ref: '#/components/parameters/accountId'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Balance'
+              examples:
+                success:
+                  summary: Account balance example
+                  value:
+                    current: 15670.50
+                    available: 15420.50
+                    pending: 250.00
+                    currency: USD
+                    asOf: "2024-01-15T10:30:00Z"
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+      security:
+        - bearerAuth: []
+
+  /accounts/{accountId}/holder:
+    get:
+      tags:
+        - Accounts
+      summary: Get account holder information
+      description: Retrieve account holder details including contact information
+      operationId: getAccountHolder
+      parameters:
+        - $ref: '#/components/parameters/accountId'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountHolder'
+              examples:
+                success:
+                  summary: Account holder example
+                  value:
+                    holderId: HLD98765432
+                    name:
+                      first: John
+                      middle: M
+                      last: Smith
+                    email: john.smith@email.com
+                    phone: "+1-555-123-4567"
+                    address:
+                      line1: 123 Main Street
+                      line2: Apt 4B
+                      city: New York
+                      state: NY
+                      postalCode: "10001"
+                      country: US
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+      security:
+        - bearerAuth: []
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    accountId:
+      name: accountId
+      in: path
+      required: true
+      description: Unique account identifier
+      schema:
+        type: string
+        pattern: '^[A-Z]{2}[0-9]{14}$'
+        example: AC12345678901234
+
+  schemas:
+    AccountList:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/AccountSummary'
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+
+    AccountSummary:
+      type: object
+      properties:
+        accountId:
+          type: string
+          example: AC12345678901234
+        accountType:
+          type: string
+          enum: [checking, savings, money_market]
+        nickname:
+          type: string
+          example: Primary Checking
+        currency:
+          type: string
+          example: USD
+        status:
+          type: string
+          enum: [active, dormant, closed]
+
+    Account:
+      type: object
+      properties:
+        accountId:
+          type: string
+          example: AC12345678901234
+        accountNumber:
+          type: string
+          example: "****4567"
+        routingNumber:
+          type: string
+          example: "021000021"
+        accountType:
+          type: string
+          enum: [checking, savings, money_market]
+        nickname:
+          type: string
+          example: Primary Checking
+        currency:
+          type: string
+          example: USD
+        status:
+          type: string
+          enum: [active, dormant, closed]
+        openedDate:
+          type: string
+          format: date
+          example: "2020-03-15"
+        interestRate:
+          type: number
+          format: float
+          example: 0.05
+        balance:
+          $ref: '#/components/schemas/Balance'
+
+    Balance:
+      type: object
+      properties:
+        current:
+          type: number
+          format: decimal
+          example: 15234.56
+        available:
+          type: number
+          format: decimal
+          example: 14500.00
+        pending:
+          type: number
+          format: decimal
+          example: 734.56
+        currency:
+          type: string
+          example: USD
+        asOf:
+          type: string
+          format: date-time
+          example: "2024-01-15T10:30:00Z"
+
+    AccountHolder:
+      type: object
+      properties:
+        holderId:
+          type: string
+          example: HLD98765432
+        name:
+          type: object
+          properties:
+            first:
+              type: string
+              example: John
+            middle:
+              type: string
+              example: M
+            last:
+              type: string
+              example: Smith
+        email:
+          type: string
+          format: email
+          example: john.smith@email.com
+        phone:
+          type: string
+          example: "+1-555-123-4567"
+        address:
+          $ref: '#/components/schemas/Address'
+
+    Address:
+      type: object
+      properties:
+        line1:
+          type: string
+          example: 123 Main Street
+        line2:
+          type: string
+          example: Apt 4B
+        city:
+          type: string
+          example: New York
+        state:
+          type: string
+          example: NY
+        postalCode:
+          type: string
+          example: "10001"
+        country:
+          type: string
+          example: US
+
+    Pagination:
+      type: object
+      properties:
+        total:
+          type: integer
+          example: 45
+        limit:
+          type: integer
+          example: 20
+        offset:
+          type: integer
+          example: 0
+        hasMore:
+          type: boolean
+          example: true
+
+    Error:
+      type: object
+      properties:
+        code:
+          type: string
+          example: INVALID_REQUEST
+        message:
+          type: string
+          example: The request was invalid
+        details:
+          type: array
+          items:
+            type: object
+            properties:
+              field:
+                type: string
+              message:
+                type: string
+
+  responses:
+    Unauthorized:
+      description: Authentication required
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            code: UNAUTHORIZED
+            message: Authentication token is missing or invalid
+
+    Forbidden:
+      description: Insufficient permissions
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            code: FORBIDDEN
+            message: You do not have permission to access this resource
+
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            code: NOT_FOUND
+            message: The requested resource was not found
+
+
