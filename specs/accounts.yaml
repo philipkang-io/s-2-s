@@ -219,52 +219,6 @@ paths:
       security:
         - bearerAuth: []
 
-  /accounts/{accountId}/statements:
-    get:
-      tags:
-        - Accounts
-      summary: List account statements
-      description: Retrieve the list of monthly statements available for an account
-      operationId: listAccountStatements
-      parameters:
-        - $ref: '#/components/parameters/accountId'
-      responses:
-        '200':
-          description: Successful response
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data:
-                    type: array
-                    items:
-                      type: object
-                      properties:
-                        statementId:
-                          type: string
-                          example: ST202401
-                        period:
-                          type: string
-                          example: 2024-01
-                        url:
-                          type: string
-                          example: https://api.example.com/statements/ST202401.pdf
-              examples:
-                success:
-                  summary: Statement list example
-                  value:
-                    data:
-                      - statementId: ST202401
-                        period: 2024-01
-                        url: https://api.example.com/statements/ST202401.pdf
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '404':
-          $ref: '#/components/responses/NotFound'
-      security:
-        - bearerAuth: []
-
 components:
   securitySchemes:
     bearerAuth:
@@ -370,11 +324,6 @@ components:
           type: string
           format: date-time
           example: "2024-01-15T10:30:00Z"
-        overdraftLimit:
-          type: number
-          format: decimal
-          description: Overdraft limit on the account, if one is configured
-          example: 500.00
 
     AccountHolder:
       type: object
