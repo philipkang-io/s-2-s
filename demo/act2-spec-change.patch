@@ -1,16 +1,24 @@
-commit 3712f6385f4f4aca4a3f4a647fd12212c1c4150c
-Author: philipkang-io <philip.kang@postman.com>
-Date:   Mon Oct 5 09:40:41 2026 -0700
-
-    feat: add overdraftLimit to Balance and GET /accounts/{id}/statements
-    
-    Co-Authored-By: Claude <noreply@anthropic.com>
-
 diff --git a/specs/accounts.yaml b/specs/accounts.yaml
-index b72df5e..a673cc0 100644
+index b72df5e..d4220b6 100644
 --- a/specs/accounts.yaml
 +++ b/specs/accounts.yaml
-@@ -219,6 +219,52 @@ paths:
+@@ -139,6 +139,7 @@ paths:
+                       pending: 250.00
+                       currency: USD
+                       asOf: "2024-01-15T10:30:00Z"
++                      overdraftLimit: 500.00
+         '401':
+           $ref: '#/components/responses/Unauthorized'
+         '404':
+@@ -171,6 +172,7 @@ paths:
+                     pending: 250.00
+                     currency: USD
+                     asOf: "2024-01-15T10:30:00Z"
++                    overdraftLimit: 500.00
+         '401':
+           $ref: '#/components/responses/Unauthorized'
+         '404':
+@@ -219,6 +221,52 @@ paths:
        security:
          - bearerAuth: []
  
@@ -63,7 +71,7 @@ index b72df5e..a673cc0 100644
  components:
    securitySchemes:
      bearerAuth:
-@@ -324,6 +370,11 @@ components:
+@@ -324,6 +372,11 @@ components:
            type: string
            format: date-time
            example: "2024-01-15T10:30:00Z"

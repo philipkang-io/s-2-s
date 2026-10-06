@@ -22,7 +22,7 @@ spec commit -> diff vs Spec Hub (oasdiff) -> alert -> approve -> update Spec Hub
 - `SPEC_ID` and `COLLECTION_UID` in the workflow point at the Postman workspace `[philip]spec-to-spechub-demo`.
 
 ## Replaying Act 2
-`demo/act2-spec-change.patch` is the engineering change (adds `overdraftLimit` to Balance and `GET /accounts/{accountId}/statements`).
+`demo/act2-spec-change.patch` is the engineering change: adds `overdraftLimit` to the Balance schema **and** to the response examples for `GET /accounts/{accountId}` and `GET /accounts/{accountId}/balance`, plus a new `GET /accounts/{accountId}/statements`. The examples matter: the collection's saved responses are built from spec examples, so a schema-only change would not show up in the collection.
 ```
 git apply demo/act2-spec-change.patch && git commit -am "feat: add statements endpoint" && git push
 ```
