@@ -4,11 +4,24 @@ name: spec-to-spechub
 # currently in Postman Spec Hub, alerts reviewers, waits for approval, then updates
 # Spec Hub and regenerates the linked collection. Nothing is written back to Git.
 
+# Two modes (default: gate):
+#   gate = alert, then wait for a human to approve before Spec Hub is updated
+#   auto = alert, then push straight into the Working workspace; the team reviews
+#          when they pull Working -> Staging in Postman
+# Pick the mode with the repo variable SPEC_MODE (push-triggered runs) or the
+# "mode" input (manual runs; the input wins).
+
 on:
   push:
     branches: [main]
     paths: ['specs/**']
   workflow_dispatch:
+    inputs:
+      mode:
+        description: 'gate = wait for approval, auto = push straight to Working'
+        type: choice
+        options: [gate, auto]
+        default: gate
 
 permissions:
   contents: write   # commit comment for the alert
@@ -23,8 +36,17 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       changed: ${{ steps.d.outputs.changed }}
+      mode: ${{ steps.m.outputs.mode }}
     steps:
       - uses: actions/checkout@v4
+
+      - name: Resolve mode
+        id: m
+        run: |
+          mode="${{ inputs.mode || vars.SPEC_MODE || 'gate' }}"
+          case "$mode" in gate|auto) ;; *) echo "Unknown mode '$mode', using gate"; mode=gate;; esac
+          echo "mode=$mode" >> "$GITHUB_OUTPUT"
+          echo "Mode: $mode"
 
       - name: Fetch the approved spec from Spec Hub
         env:
@@ -48,16 +70,21 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          MODE: ${{ steps.m.outputs.mode }}
         run: |
           {
-            echo "## Spec change detected: awaiting review"
+            if [ "$MODE" = "auto" ]; then echo "## Spec change detected: updating the Working workspace"; else echo "## Spec change detected: awaiting review"; fi
             echo
             echo "Commit \`${GITHUB_SHA::7}\` changes \`$SPEC_FILE\` compared with the spec in Spec Hub."
             echo
             echo "### All changes"; echo '```'; cat diff/changelog.txt; echo '```'
             echo "### Breaking changes"; echo '```'; if [ -s diff/breaking.txt ]; then cat diff/breaking.txt; else echo "none"; fi; echo '```'
             echo
-            echo "Approve the **spechub-approval** environment in the next job to update Spec Hub and regenerate the collection."
+            if [ "$MODE" = "auto" ]; then
+              echo "Mode: **auto**. The Working workspace is updated automatically. Review the change in Postman: Staging, then Pull Changes."
+            else
+              echo "Mode: **gate**. Approve the **spechub-approval** environment in the next job to update Spec Hub and regenerate the collection."
+            fi
           } > diff/alert.md
           cat diff/alert.md >> "$GITHUB_STEP_SUMMARY"
           gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/comments" -F body=@diff/alert.md > /dev/null
@@ -69,7 +96,8 @@ jobs:
     needs: diff
     if: needs.diff.outputs.changed == 'true'
     runs-on: ubuntu-latest
-    environment: spechub-approval   # required reviewer = the approval gate
+    # gate -> spechub-approval (required reviewer); auto -> spechub-auto (no reviewers)
+    environment: ${{ needs.diff.outputs.mode == 'auto' && 'spechub-auto' || 'spechub-approval' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -95,7 +123,9 @@ jobs:
           for i in $(seq 1 30); do
             s=$(curl -s "https://api.postman.com$url" -H "X-API-Key: $POSTMAN_API_KEY" | jq -r .status)
             echo "sync status: $s"
-            [ "$s" = "completed" ] && { echo "### Spec Hub updated and collection regenerated" >> "$GITHUB_STEP_SUMMARY"; exit 0; }
+            [ "$s" = "completed" ] && {
+              if [ "${{ needs.diff.outputs.mode }}" = "auto" ]; then echo "### Working workspace updated. Review it in Postman: Staging, then Pull Changes." >> "$GITHUB_STEP_SUMMARY"; else echo "### Spec Hub updated and collection regenerated" >> "$GITHUB_STEP_SUMMARY"; fi
+              exit 0; }
             [ "$s" = "failed" ] && exit 1
             sleep 4
           done
