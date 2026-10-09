@@ -27,7 +27,9 @@ permissions:
   contents: write   # commit comment for the alert
 
 env:
-  SPEC_ID: 11360fd7-754a-49ef-9cdf-fa193bad5aaa
+  SPEC_ID: 11360fd7-754a-49ef-9cdf-fa193bad5aaa          # Working spec: the one the publish job updates
+  STAGING_SPEC_ID: 30aeab30-6628-46ca-a4be-34cdfecbf01d  # Staging spec: what the reviewers currently see
+  STAGING_WORKSPACE_ID: b0c6742d-2a77-44b6-a6dc-69bded924678  # where the auto-mode announcement is posted
   COLLECTION_UID: 52509354-fbcaeb1b-223c-4c84-b408-fcb16420057e
   SPEC_FILE: accounts.yaml
 
@@ -51,9 +53,14 @@ jobs:
       - name: Fetch the approved spec from Spec Hub
         env:
           POSTMAN_API_KEY: ${{ secrets.POSTMAN_API_KEY }}
+          MODE: ${{ steps.m.outputs.mode }}
         run: |
           mkdir -p diff
-          curl -sf "https://api.postman.com/specs/$SPEC_ID/files/$SPEC_FILE" \
+          # auto: Working updates on every commit, so compare against Staging, the copy
+          # the reviewers see. The alert then lists everything they have not accepted yet.
+          # gate: Spec Hub is only updated on approval, so Working is already the baseline.
+          if [ "$MODE" = "auto" ]; then BASE_ID="$STAGING_SPEC_ID"; else BASE_ID="$SPEC_ID"; fi
+          curl -sf "https://api.postman.com/specs/$BASE_ID/files/$SPEC_FILE" \
             -H "X-API-Key: $POSTMAN_API_KEY" | jq -r .content > diff/base.yaml
           cp "specs/$SPEC_FILE" diff/new.yaml
 
@@ -87,10 +94,20 @@ jobs:
             fi
           } > diff/alert.md
           cat diff/alert.md >> "$GITHUB_STEP_SUMMARY"
-          gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/comments" -F body=@diff/alert.md > /dev/null
+          # auto: the alert goes to Postman (see the publish job), not to GitHub
+          if [ "$MODE" != "auto" ]; then
+            gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/comments" -F body=@diff/alert.md > /dev/null
+          fi
           if [ -n "$SLACK_WEBHOOK_URL" ]; then
             jq -n --rawfile t diff/alert.md '{text:$t}' | curl -s -X POST -H 'Content-Type: application/json' -d @- "$SLACK_WEBHOOK_URL" > /dev/null
           fi
+
+      - name: Keep the alert for the publish job
+        if: steps.d.outputs.changed == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: alert
+          path: diff/alert.md
 
   publish:
     needs: diff
@@ -130,3 +147,30 @@ jobs:
             sleep 4
           done
           echo "Timed out waiting for collection sync"; exit 1
+
+      # auto only: announce the change inside Postman, in the Staging workspace's Updates tab,
+      # once Working holds it, so Pull Changes is already available when the team opens Staging.
+      - name: Fetch the alert text
+        if: needs.diff.outputs.mode == 'auto'
+        uses: actions/download-artifact@v4
+        with:
+          name: alert
+          path: alert
+
+      - name: Post the workspace update
+        if: needs.diff.outputs.mode == 'auto'
+        env:
+          POSTMAN_API_KEY: ${{ secrets.POSTMAN_API_KEY }}
+        run: |
+          {
+            echo "Commit \`${GITHUB_SHA::7}\` changed \`$SPEC_FILE\` in GitHub. The Working workspace is updated; Staging is not yet."
+            echo
+            echo "To review: Staging workspace, Specs, Accounts API, three-dot menu, Pull Changes. After accepting, click Update Collection."
+            echo
+            sed -n '/### All changes/,$p' alert/alert.md | sed '/^Mode:/,$d'
+          } > announce.md
+          jq -n --rawfile d announce.md '{topic:"Spec change detected in GitHub", category:"announcement", description:$d}' > announce.json
+          code=$(curl -s -o resp.json -w '%{http_code}' -X POST "https://api.postman.com/workspaces/$STAGING_WORKSPACE_ID/updates" \
+            -H "X-API-Key: $POSTMAN_API_KEY" -H "Content-Type: application/json" -d @announce.json)
+          [ "$code" = "200" ] || { echo "Workspace update failed ($code)"; cat resp.json; exit 1; }
+          echo "### Announcement posted in the Staging workspace (Updates tab)." >> "$GITHUB_STEP_SUMMARY"
